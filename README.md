@@ -75,3 +75,108 @@ $ docker compose build web
 `ALLOWED_HOSTS` -- настройка Django со списком разрешённых адресов. Если запрос прилетит на другой адрес, то сайт ответит ошибкой 400. Можно перечислить несколько адресов через запятую, например `127.0.0.1,192.168.0.1,site.test`. [Документация Django](https://docs.djangoproject.com/en/3.2/ref/settings/#allowed-hosts).
 
 `DATABASE_URL` -- адрес для подключения к базе данных PostgreSQL. Другие СУБД сайт не поддерживает. [Формат записи](https://github.com/jacobian/dj-database-url#url-schema).
+
+
+## Развертывание через Kubernetes, Minikube на Windows
+
+Установите [kubectl](https://kubernetes.io/ru/docs/tasks/tools/install-kubectl/), [minikube](https://kubernetes.io/ru/docs/tasks/tools/install-minikube/) и [Helm](https://helm.sh) и запустите кластер на виртуальной машине.
+
+
+### Соберите docker образ с django
+
+Перейдите в директорию проекта и выполните следующую команду для сборки образа:
+
+  ```shell
+  minikube image build ./backend_main_django/
+  ```
+
+### Установите helm и запустите в нем PostgreSQL
+
+- [Инструкция по установке Helm](https://helm.sh/docs/intro/install/#from-script)
+  
+- Перейдите в директорию `k8s`, находящуюся в корне проекта, и создайте в ней файл `db-values.yaml` с параметрами DB:
+  ```yaml
+  global:
+  postgresql:
+    auth:
+      username: "<db_username>"
+      password: "<db_password>"
+      database: "<db_name>"
+  ```
+
+- Выполните команды для развертывания БД:
+
+  ```shell
+  helm repo add bitnami https://charts.bitnami.com/bitnami
+  ```
+
+  ```shell
+  helm install <name> bitnami/postgresql -f db-values.yaml
+  ```
+
+### Задайте секретные данные в манифест файле
+
+- Перейдите в директорию `k8s`, находящуюся в корне проекта
+
+- Создайте файл `Secrets.yaml` и наполните его следующим содержимым:
+
+  ```yaml
+  apiVersion: v1
+  kind: Secret
+  metadata:
+    name: django-secrets
+  type: Opaque
+  stringData:
+    SECRET_KEY: "<django secret_key>"
+    DATABASE_URL: "postgres://<db_username>:<db_password>@<cluster_ip>/<db_name>"
+  ```
+
+- Запустите команду:
+
+  ```shell
+  kubectl apply -f secrets.yml
+  ```
+
+### Привяжите домен к локальной машине:
+
+- Узнайте IP текущей ноды, выполнив следующую команду
+
+  ```shell
+  minikube ip
+  ```
+
+- Перейдите в файл `hosts`
+  
+  ```shell
+  sudo nano /etc/hosts
+  ```
+
+- Поместите в конец файла следующую строчку:
+
+  ```
+  <minikube_ip> <domain_name>
+  ```
+
+### Запустите Django приложение
+
+- Перейдите в директорию `k8s`, находящуюся в корне проекта
+
+- Запустите приложение следующими командами:
+
+  ```shell
+  kubectl apply -f deployment.yaml
+  kubectl apply -f service.yaml
+  kubectl apply -f ingres.ymal
+  ```
+
+- Запустите Cronjobs для удаления просроченных сессий и наката миграций:
+
+  ```shell
+  kubectl apply -f clearsessions.yaml
+  kubectl apply -f migrate.yaml
+  ```
+
+### Результат
+
+Перейдите по ссылке `<domain_name>`, указанном в файле `hosts`.
+
